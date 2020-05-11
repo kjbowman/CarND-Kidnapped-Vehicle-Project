@@ -30,7 +30,7 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
    * NOTE: Consult particle_filter.h for more information about this method 
    *   (and others in this file).
    */
-  num_particles = 1000;  // TODO: Set the number of particles
+  num_particles = 50;  // TODO: Set the number of particles
   std::default_random_engine gen;
   
   // creates normal (Gaussian) distributions for x initial position
@@ -40,13 +40,16 @@ void ParticleFilter::init(double x, double y, double theta, double std[]) {
   
   for(int i = 0; i < num_particles; ++i) {
     Particle p;
+    p.id = i;
     p.x = dist_x(gen);
     p.y = dist_y(gen);
     p.theta = dist_theta(gen);
     p.weight = 1.0;
     
-    particles.push_back(p)
+    particles.push_back(p);
   }
+
+  is_initialized = true;
 }
 
 void ParticleFilter::prediction(double delta_t, double std_pos[], 
@@ -87,7 +90,6 @@ void ParticleFilter::prediction(double delta_t, double std_pos[],
     p.y = dist_y(gen);
     p.theta = dist_theta(gen);
   }
-
 }
 
 void ParticleFilter::dataAssociation(vector<LandmarkObs> predicted, 
@@ -101,6 +103,15 @@ void ParticleFilter::dataAssociation(vector<LandmarkObs> predicted,
    *   during the updateWeights phase.
    */
 
+  for(auto& obs : observations) {
+    vecton<double> distances;
+    for(auto& pred : predicted) {
+      distances.pushback(dist(pred.x, pred.y, obs.x, obs.y));
+    }
+    auto shortest_dist = std::min_element(distances.begin(), distance.end());
+    int index = std::distance(distances.begin(), shortest_dist);
+    obs.id = predicted[index].id;
+  }
 }
 
 void ParticleFilter::updateWeights(double sensor_range, double std_landmark[], 
@@ -120,6 +131,50 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
    *   (look at equation 3.33) http://planning.cs.uiuc.edu/node99.html
    */
 
+  // to use dataAssociation, we need a vector of landmarks in the format of LandmarkObs
+  vector<LandmarkObs> landmarks;
+  for(auto& lm : map_landmarks.landmark_list) {
+    LandmarkObs lm_temp;
+    lm_temp.id = lm.id_i;
+    lm_temp.x = lm.x_f;
+    lm_temp.y = lm.y_f;
+    landmarks.pushback(lm_temp);
+  }
+
+  double sigma_x = std_landmark[0];
+  double sigma_y = std_landmark[1];
+  double sigma_x2 = 2 * sigma_x * sigma_x;
+  double sigma_y2 = 2 * sigma_y * sigma_y;
+  double normalizer = 1.0 / (2 * M_PI * sigma_x * sigma_y);
+
+  for(auto& p : particles) {
+    // transform observations into map coordinates
+    double cos_theta = cos(p.theta);
+    double sin_theta = sin(p.theta);
+    vector<LandmarkObs> observations_map;
+    for(auto &obs : observations) {
+      double xm = p.x + (cos_theta * obs.x) - (sin_theta * obs.y);
+      double ym = p.y + (sin_theta * obs.x) + (cos_theta * obs.y);
+      LandmarkObs obs_temp;
+      obs_temp.id = 0;
+      obs_temp.x = xm;
+      obs_temp.y = xy;
+      observations_map.push_back(obs_temp);
+      p.sense_x.push_back(xm);
+      p.sense_y.push_back(ym);
+    }
+    // get associations
+    dataAssociation(landmarks, observations_map);
+    double prob = 1.0
+    for(auto& o : observations_map) {
+      p.associations.push_back(o.id)
+      auto lm = map_landmarks.landmark_list[o.id-1];
+      prob *= normalizer * exp(-( pow(o.x-lm.x_f, 2)/sigma_x2
+                               + pow(o.y-lm.y_f, 2)/sigma_y2));
+    }
+    // update weight with pdf
+    p.weight = prob;
+  }
 }
 
 void ParticleFilter::resample() {
